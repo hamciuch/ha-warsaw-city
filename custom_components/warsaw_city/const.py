@@ -1,15 +1,15 @@
 DOMAIN = "warsaw_city"
 CONF_API_KEY = "api_key"
 CONF_STOPS = "stops"
-CONF_STOP_NAME = "stop_name"
-CONF_STOP_ID = "stop_id"
-CONF_STOP_NR = "stop_nr"
 
-BASE_URL = "https://api.um.warszawa.pl/api/action"
+BASE_URL = "https://dane.um.warszawa.pl/api/action"
+VEHICLES_ENDPOINT = "get_ztm_lokalizacja_pojazdow"
+STOPS_ENDPOINT = "get_ztm_przystanki_komunikacji_miejskiej"
+DEPARTURES_ENDPOINT = "get_ztm_odjazdy_linii_z_przystanku"
+
+# Alerts remain sourced from the community GTFS-RT bridge until the new city portal
+# exposes a documented disruptions endpoint suitable for line filtering.
 ALERTS_URL = "https://mkuran.pl/gtfs/warsaw/alerts.json"
 
-LINES_DATASET = "88cd555f-6f31-43ca-9de4-66c479ad5942"
-TIMETABLE_DATASET = "e923fa0e-d96c-43f9-ae6e-60518c9f3238"
-EVENTS_DATASET = "fbf95b7b-ff95-48bc-afda-a16e968cc9a6"
-
 DEFAULT_DEPARTURES = 6
+VEHICLE_MAX_AGE_SECONDS = 180

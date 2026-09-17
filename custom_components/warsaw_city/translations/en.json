@@ -1,16 +1,33 @@
 {
   "config": {
-    "step": {"user": {"title": "Warsaw City Open Data", "description": "Podaj klucz API api.um.warszawa.pl", "data": {"api_key": "API key"}}},
-    "error": {"cannot_connect": "Nie udało się połączyć z API lub klucz jest nieprawidłowy."}
+    "step": {
+      "user": {
+        "title": "Warsaw City Open Data",
+        "description": "Enter the API token generated at dane.um.warszawa.pl.",
+        "data": {"api_key": "API token"}
+      }
+    },
+    "error": {
+      "invalid_auth": "The token was rejected by dane.um.warszawa.pl.",
+      "cannot_connect": "Could not connect to dane.um.warszawa.pl.",
+      "unknown": "An unexpected error occurred. Check the Home Assistant log."
+    }
   },
   "options": {
     "step": {
-      "add_stop": {"title": "Dodaj przystanek", "data": {"query": "Nazwa przystanku"}},
-      "choose_stop": {"title": "Wybierz zespół przystankowy", "data": {"stop": "Przystanek"}},
-      "choose_post": {"title": "Wybierz słupek", "data": {"post": "Numer słupka"}},
-      "remove_stop": {"title": "Usuń przystanek", "data": {"stop": "Przystanek"}}
+      "add_stop": {"title": "Add stop", "data": {"query": "Stop name"}},
+      "choose_stop": {"title": "Choose stop group", "data": {"stop": "Stop"}},
+      "choose_post": {"title": "Choose stop post", "data": {"post": "Post number"}},
+      "remove_stop": {"title": "Remove stop", "data": {"stop": "Stop"}}
     },
-    "error": {"stop_not_found": "Nie znaleziono przystanku."},
-    "abort": {"no_posts": "Nie znaleziono słupków dla tego przystanku.", "no_stops": "Nie ma zapisanych przystanków."}
+    "error": {
+      "invalid_auth": "The token was rejected by dane.um.warszawa.pl.",
+      "cannot_connect": "Could not download data from dane.um.warszawa.pl.",
+      "stop_not_found": "Stop not found."
+    },
+    "abort": {
+      "no_posts": "No stop posts were found for this stop.",
+      "no_stops": "No stops have been configured."
+    }
   }
 }
