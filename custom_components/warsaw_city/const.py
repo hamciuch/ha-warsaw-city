@@ -5,6 +5,7 @@ CONF_STOPS = "stops"
 BASE_URL = "https://dane.um.warszawa.pl/api/action"
 VEHICLES_ENDPOINT = "get_ztm_lokalizacja_pojazdow"
 STOPS_ENDPOINT = "get_ztm_przystanki_komunikacji_miejskiej"
+LINES_ENDPOINT = "get_ztm_lista_linii_na_przystanku"
 DEPARTURES_ENDPOINT = "get_ztm_odjazdy_linii_z_przystanku"
 
 # Alerts remain sourced from the community GTFS-RT bridge until the new city portal

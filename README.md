@@ -1,9 +1,14 @@
-# v0.2.2 options-flow fix
+# v0.2.3 — correct ZTM line/departure API calls
 
-Patch changes:
-- safer line selection after choosing a stop post
-- catches API errors instead of Home Assistant generic "Unknown error occurred"
-- uses a simpler multi-select selector compatible with more HA versions
-- version bumped to 0.2.2
+The previous code incorrectly called `get_ztm_odjazdy_linii_z_przystanku`
+without the required JSON body.
 
-Copy files over `custom_components/warsaw_city/`, restart Home Assistant, and retry adding the stop.
+New API flow:
+1. `get_ztm_lista_linii_na_przystanku`
+   body: `{"busstopId":"...","busstopNr":"..."}`
+2. For every selected line:
+   `get_ztm_odjazdy_linii_z_przystanku`
+   body: `{"busstopId":"...","busstopNr":"...","line":"..."}`
+
+Overwrite the matching files in `custom_components/warsaw_city/`,
+restart Home Assistant and retry the stop configuration.

@@ -10,6 +10,7 @@ from .const import (
     ALERTS_URL,
     BASE_URL,
     DEPARTURES_ENDPOINT,
+    LINES_ENDPOINT,
     STOPS_ENDPOINT,
     VEHICLES_ENDPOINT,
     VEHICLE_MAX_AGE_SECONDS,
@@ -35,6 +36,9 @@ def _norm_key(value: Any) -> str:
 
 
 def _flatten_row(row: Any) -> dict[str, Any]:
+    if isinstance(row, str):
+        return {"linia": row}
+
     if not isinstance(row, dict):
         return {}
 
@@ -43,9 +47,11 @@ def _flatten_row(row: Any) -> dict[str, Any]:
         for item in row["values"]:
             if (
                 isinstance(item, dict)
-                and item.get("key") is not None
+                and item.get("key", item.get("Key")) is not None
             ):
-                out[_norm_key(item.get("key"))] = item.get("value")
+                key = item.get("key", item.get("Key"))
+                value = item.get("value", item.get("Value"))
+                out[_norm_key(key)] = value
         return out
 
     return {
@@ -57,16 +63,19 @@ def _flatten_row(row: Any) -> dict[str, Any]:
 def _as_rows(payload: Any) -> list[dict[str, Any]]:
     data = payload
 
+    # Unwrap result wrappers recursively.
+    while isinstance(data, dict) and "result" in data:
+        if data.get("error"):
+            raise WarsawApiError(str(data["error"]))
+        data = data.get("result")
+
     if isinstance(data, dict):
         if data.get("error"):
             raise WarsawApiError(str(data["error"]))
 
-        if "result" in data:
-            data = data.get("result")
-        elif "records" in data:
-            data = data.get("records")
+        if data.get("success") is False:
+            raise WarsawApiError(str(data.get("error") or data))
 
-    if isinstance(data, dict):
         for key in (
             "records",
             "data",
@@ -76,15 +85,25 @@ def _as_rows(payload: Any) -> list[dict[str, Any]]:
             if isinstance(data.get(key), list):
                 data = data[key]
                 break
+        else:
+            data = [data]
 
-    if not isinstance(data, list):
+    if data is None:
         return []
 
-    return [
-        _flatten_row(row)
-        for row in data
-        if isinstance(row, dict)
-    ]
+    if not isinstance(data, list):
+        raise WarsawApiError(
+            f"Unexpected API payload type: {type(data).__name__}"
+        )
+
+    rows: list[dict[str, Any]] = []
+
+    for row in data:
+        flat = _flatten_row(row)
+        if flat:
+            rows.append(flat)
+
+    return rows
 
 
 def _pick(row: dict[str, Any], *names: str) -> Any:
@@ -104,8 +123,14 @@ class WarsawApi:
     ) -> None:
         self.session = session
         self.api_key = api_key.strip()
+
         self._stops_cache = None
-        self._departures_cache = None
+        self._lines_cache: dict[
+            tuple[str, str], tuple[float, list[str]]
+        ] = {}
+        self._departures_cache: dict[
+            tuple[str, str, str], tuple[float, list[dict[str, Any]]]
+        ] = {}
         self._vehicles_cache = None
 
     async def _post(
@@ -116,6 +141,7 @@ class WarsawApi:
         headers = {
             "Authorization": self.api_key,
             "Accept": "application/json",
+            "User-Agent": "ha-warsaw-city/0.2.3",
         }
 
         kwargs: dict[str, Any] = {
@@ -194,7 +220,7 @@ class WarsawApi:
             return self._stops_cache[1]
 
         rows = _as_rows(
-            await self._post(STOPS_ENDPOINT)
+            await self._post(STOPS_ENDPOINT, {})
         )
 
         normalized = []
@@ -292,79 +318,89 @@ class WarsawApi:
 
         return sorted(posts)
 
-    async def _all_departure_rows(
-        self,
-        force: bool = False,
-    ) -> list[dict[str, Any]]:
-        now = time.monotonic()
-
-        if (
-            not force
-            and self._departures_cache
-            and now - self._departures_cache[0] < 300
-        ):
-            return self._departures_cache[1]
-
-        rows = _as_rows(
-            await self._post(DEPARTURES_ENDPOINT)
-        )
-
-        self._departures_cache = (
-            now,
-            rows,
-        )
-
-        return rows
-
     async def stop_lines(
         self,
         stop_id: str,
         stop_nr: str,
+        force: bool = False,
     ) -> list[str]:
-        """Return all lines serving the selected stop post."""
-        stop_id = str(stop_id)
-        stop_nr = str(stop_nr).zfill(2)
+        """Return lines serving exactly one stop post."""
+        stop_id = str(stop_id).strip()
+        stop_nr = str(stop_nr).strip().zfill(2)
+        cache_key = (stop_id, stop_nr)
+        now = time.monotonic()
 
-        lines = set()
+        cached = self._lines_cache.get(cache_key)
+        if (
+            not force
+            and cached
+            and now - cached[0] < 300
+        ):
+            return cached[1]
 
-        for row in await self._all_departure_rows():
-            rid = _pick(
+        payload = await self._post(
+            LINES_ENDPOINT,
+            {
+                "busstopId": stop_id,
+                "busstopNr": stop_nr,
+            },
+        )
+
+        lines: set[str] = set()
+
+        for row in _as_rows(payload):
+            line = _pick(
                 row,
-                "zespol",
-                "nr_zespolu",
-                "stop_id",
-                "busstopid",
-                "id_zespolu",
-            )
-            rnr = _pick(
-                row,
-                "slupek",
-                "nr_przystanku",
-                "stop_nr",
-                "busstopnr",
-                "nr_slupek",
+                "linia",
+                "line",
+                "lines",
             )
 
-            if (
-                str(rid or "") != stop_id
-                or str(rnr or "").zfill(2) != stop_nr
-            ):
-                continue
+            # Some responses have a single unnamed value.
+            if line in (None, "") and len(row) == 1:
+                line = next(iter(row.values()))
 
-            line = str(
-                _pick(
-                    row,
-                    "linia",
-                    "line",
-                    "lines",
-                )
-                or ""
-            ).strip()
+            if line not in (None, ""):
+                lines.add(str(line).strip())
 
-            if line:
-                lines.add(line)
+        result = sorted(lines)
+        self._lines_cache[cache_key] = (now, result)
 
-        return sorted(lines)
+        return result
+
+    async def _line_departures(
+        self,
+        stop_id: str,
+        stop_nr: str,
+        line: str,
+        force: bool = False,
+    ) -> list[dict[str, Any]]:
+        stop_id = str(stop_id).strip()
+        stop_nr = str(stop_nr).strip().zfill(2)
+        line = str(line).strip()
+        cache_key = (stop_id, stop_nr, line)
+        now = time.monotonic()
+
+        cached = self._departures_cache.get(cache_key)
+        if (
+            not force
+            and cached
+            and now - cached[0] < 30
+        ):
+            return cached[1]
+
+        payload = await self._post(
+            DEPARTURES_ENDPOINT,
+            {
+                "busstopId": stop_id,
+                "busstopNr": stop_nr,
+                "line": line,
+            },
+        )
+
+        rows = _as_rows(payload)
+        self._departures_cache[cache_key] = (now, rows)
+        return rows
 
     async def vehicles(
         self,
@@ -464,151 +500,123 @@ class WarsawApi:
         line_filter: set[str] | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         now = datetime.now().astimezone()
-        rows = await self._all_departure_rows()
+
+        available_lines = await self.stop_lines(
+            stop_id,
+            stop_nr,
+        )
+
+        if line_filter:
+            selected_lines = [
+                line
+                for line in available_lines
+                if line in line_filter
+            ]
+        else:
+            selected_lines = available_lines
+
         vehicles = await self.vehicles()
+        departures: list[dict[str, Any]] = []
 
-        stop_id = str(stop_id)
-        stop_nr = str(stop_nr).zfill(2)
-
-        departures = []
-        lines = set()
-
-        for row in rows:
-            rid = _pick(
-                row,
-                "zespol",
-                "nr_zespolu",
-                "stop_id",
-                "busstopid",
-                "id_zespolu",
-            )
-            rnr = _pick(
-                row,
-                "slupek",
-                "nr_przystanku",
-                "stop_nr",
-                "busstopnr",
-                "nr_slupek",
+        for line in selected_lines:
+            rows = await self._line_departures(
+                stop_id,
+                stop_nr,
+                line,
             )
 
-            if (
-                str(rid or "") != stop_id
-                or str(rnr or "").zfill(2) != stop_nr
-            ):
-                continue
-
-            line = str(
-                _pick(
+            for row in rows:
+                raw_time = _pick(
                     row,
-                    "linia",
-                    "line",
-                    "lines",
+                    "czas",
+                    "time",
+                    "godzina",
+                    "departure_time",
                 )
-                or ""
-            ).strip()
 
-            if (
-                not line
-                or (
-                    line_filter
-                    and line not in line_filter
-                )
-            ):
-                continue
+                if not raw_time:
+                    continue
 
-            raw_time = _pick(
-                row,
-                "czas",
-                "time",
-                "godzina",
-                "departure_time",
-            )
-
-            if not raw_time:
-                continue
-
-            lines.add(line)
-
-            try:
-                h, m, s = (
-                    int(x)
-                    for x in str(raw_time).split(":")
-                )
-            except (TypeError, ValueError):
-                continue
-
-            day_add, h = divmod(h, 24)
-
-            dep = now.replace(
-                hour=h,
-                minute=m,
-                second=s,
-                microsecond=0,
-            ) + timedelta(days=day_add)
-
-            if dep < now - timedelta(seconds=30):
-                continue
-
-            brigade = str(
-                _pick(
-                    row,
-                    "brygada",
-                    "brigade",
-                )
-                or ""
-            ).strip()
-
-            live = next(
-                (
-                    v
-                    for v in vehicles
-                    if (
-                        not v["stale"]
-                        and v["line"] == line
-                        and (
-                            not brigade
-                            or v["brigade"].lstrip("0")
-                            == brigade.lstrip("0")
-                        )
+                try:
+                    h, m, s = (
+                        int(x)
+                        for x in str(raw_time).split(":")
                     )
-                ),
-                None,
-            )
+                except (TypeError, ValueError):
+                    continue
 
-            departures.append(
-                {
-                    "line": line,
-                    "direction": str(
-                        _pick(
-                            row,
-                            "kierunek",
-                            "direction",
+                day_add, h = divmod(h, 24)
+
+                dep = now.replace(
+                    hour=h,
+                    minute=m,
+                    second=s,
+                    microsecond=0,
+                ) + timedelta(days=day_add)
+
+                if dep < now - timedelta(seconds=30):
+                    continue
+
+                brigade = str(
+                    _pick(
+                        row,
+                        "brygada",
+                        "brigade",
+                    )
+                    or ""
+                ).strip()
+
+                live = next(
+                    (
+                        v
+                        for v in vehicles
+                        if (
+                            not v["stale"]
+                            and v["line"] == line
+                            and (
+                                not brigade
+                                or v["brigade"].lstrip("0")
+                                == brigade.lstrip("0")
+                            )
                         )
-                        or ""
                     ),
-                    "route": str(
-                        _pick(
-                            row,
-                            "trasa",
-                            "route",
-                        )
-                        or ""
-                    ),
-                    "brigade": brigade,
-                    "scheduled": dep.isoformat(),
-                    "time": dep.strftime("%H:%M"),
-                    "minutes": max(
-                        0,
-                        int(
-                            (
-                                dep - now
-                            ).total_seconds()
-                            // 60
+                    None,
+                )
+
+                departures.append(
+                    {
+                        "line": line,
+                        "direction": str(
+                            _pick(
+                                row,
+                                "kierunek",
+                                "direction",
+                            )
+                            or ""
                         ),
-                    ),
-                    "vehicle": live,
-                }
-            )
+                        "route": str(
+                            _pick(
+                                row,
+                                "trasa",
+                                "route",
+                            )
+                            or ""
+                        ),
+                        "brigade": brigade,
+                        "scheduled": dep.isoformat(),
+                        "time": dep.strftime("%H:%M"),
+                        "minutes": max(
+                            0,
+                            int(
+                                (
+                                    dep - now
+                                ).total_seconds()
+                                // 60
+                            ),
+                        ),
+                        "vehicle": live,
+                    }
+                )
 
         departures.sort(
             key=lambda x: x["scheduled"]
@@ -616,7 +624,7 @@ class WarsawApi:
 
         return (
             departures[:limit],
-            sorted(lines),
+            sorted(selected_lines),
         )
 
     async def air_quality(
@@ -676,19 +684,11 @@ class WarsawApi:
                 filtered.append(
                     {
                         "id": alert.get("id"),
-                        "title": alert.get(
-                            "title"
-                        ),
+                        "title": alert.get("title"),
                         "lines": hit,
-                        "effect": alert.get(
-                            "effect"
-                        ),
-                        "link": alert.get(
-                            "link"
-                        ),
-                        "body": alert.get(
-                            "body"
-                        ),
+                        "effect": alert.get("effect"),
+                        "link": alert.get("link"),
+                        "body": alert.get("body"),
                     }
                 )
 
