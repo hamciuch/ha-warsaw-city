@@ -8,5 +8,8 @@
   "documentation": "https://github.com/hamciuch/ha-warsaw-city",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/hamciuch/ha-warsaw-city/issues",
-  "version": "0.2.3"
+  "requirements": [
+    "beautifulsoup4==4.13.5"
+  ],
+  "version": "0.3.0"
 }

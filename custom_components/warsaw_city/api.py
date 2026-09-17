@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import re
 import time
 from typing import Any
+
+from bs4 import BeautifulSoup
 
 from aiohttp import ClientResponseError, ClientSession
 
@@ -14,6 +17,15 @@ from .const import (
     STOPS_ENDPOINT,
     VEHICLES_ENDPOINT,
     VEHICLE_MAX_AGE_SECONDS,
+)
+
+
+GIOS_BASE_URL = "https://api.gios.gov.pl/pjp-api/v1/rest"
+WARSAW_EVENTS_URL = "https://cam.warszawa.pl/wydarzenia-w-warszawie/"
+
+_EVENT_MONTHS = (
+    "sty", "lut", "mar", "kwi", "maj", "cze",
+    "lip", "sie", "wrz", "paź", "paz", "lis", "gru",
 )
 
 
@@ -35,24 +47,46 @@ def _norm_key(value: Any) -> str:
     )
 
 
+def _flatten_key_value_list(items: list[Any]) -> dict[str, Any]:
+    """Convert [{key: ..., value: ...}, ...] to a flat dictionary."""
+    out: dict[str, Any] = {}
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        key = item.get("key", item.get("Key"))
+        if key is None:
+            continue
+
+        value = item.get("value", item.get("Value"))
+        out[_norm_key(key)] = value
+
+    return out
+
+
 def _flatten_row(row: Any) -> dict[str, Any]:
+    """Normalize all record shapes returned by dane.um.warszawa.pl."""
+
+    # New ZTM timetable format:
+    # [
+    #   {"value":"4","key":"brygada"},
+    #   {"value":"Cm. Wolski","key":"kierunek"},
+    #   {"value":"21:15:00","key":"czas"}
+    # ]
+    if isinstance(row, list):
+        return _flatten_key_value_list(row)
+
     if isinstance(row, str):
         return {"linia": row}
 
     if not isinstance(row, dict):
         return {}
 
+    # Older/alternate format:
+    # {"values": [{"key":"czas","value":"21:15:00"}, ...]}
     if isinstance(row.get("values"), list):
-        out: dict[str, Any] = {}
-        for item in row["values"]:
-            if (
-                isinstance(item, dict)
-                and item.get("key", item.get("Key")) is not None
-            ):
-                key = item.get("key", item.get("Key"))
-                value = item.get("value", item.get("Value"))
-                out[_norm_key(key)] = value
-        return out
+        return _flatten_key_value_list(row["values"])
 
     return {
         _norm_key(k): v
@@ -61,6 +95,8 @@ def _flatten_row(row: Any) -> dict[str, Any]:
 
 
 def _as_rows(payload: Any) -> list[dict[str, Any]]:
+    """Extract and normalize records from Warsaw API response shapes."""
+
     data = payload
 
     # Unwrap result wrappers recursively.
@@ -132,6 +168,8 @@ class WarsawApi:
             tuple[str, str, str], tuple[float, list[dict[str, Any]]]
         ] = {}
         self._vehicles_cache = None
+        self._gios_station_cache = None
+        self._events_cache = None
 
     async def _post(
         self,
@@ -141,7 +179,7 @@ class WarsawApi:
         headers = {
             "Authorization": self.api_key,
             "Accept": "application/json",
-            "User-Agent": "ha-warsaw-city/0.2.3",
+            "User-Agent": "ha-warsaw-city/0.2.4",
         }
 
         kwargs: dict[str, Any] = {
@@ -324,7 +362,6 @@ class WarsawApi:
         stop_nr: str,
         force: bool = False,
     ) -> list[str]:
-        """Return lines serving exactly one stop post."""
         stop_id = str(stop_id).strip()
         stop_nr = str(stop_nr).strip().zfill(2)
         cache_key = (stop_id, stop_nr)
@@ -356,7 +393,6 @@ class WarsawApi:
                 "lines",
             )
 
-            # Some responses have a single unnamed value.
             if line in (None, "") and len(row) == 1:
                 line = next(iter(row.values()))
 
@@ -378,6 +414,7 @@ class WarsawApi:
         stop_id = str(stop_id).strip()
         stop_nr = str(stop_nr).strip().zfill(2)
         line = str(line).strip()
+
         cache_key = (stop_id, stop_nr, line)
         now = time.monotonic()
 
@@ -399,7 +436,12 @@ class WarsawApi:
         )
 
         rows = _as_rows(payload)
-        self._departures_cache[cache_key] = (now, rows)
+
+        self._departures_cache[cache_key] = (
+            now,
+            rows,
+        )
+
         return rows
 
     async def vehicles(
@@ -627,15 +669,458 @@ class WarsawApi:
             sorted(selected_lines),
         )
 
+    async def _gios_get(self, path: str) -> Any:
+        """GET JSON from the public GIOŚ Air Quality API."""
+        url = f"{GIOS_BASE_URL}/{path.lstrip('/')}"
+        headers = {
+            "Accept": "application/json, application/ld+json",
+            "User-Agent": "ha-warsaw-city/0.3.0",
+        }
+
+        async with self.session.get(
+            url,
+            headers=headers,
+            timeout=30,
+        ) as resp:
+            text = await resp.text()
+            resp.raise_for_status()
+
+            try:
+                return await resp.json(content_type=None)
+            except Exception as err:
+                raise WarsawApiError(
+                    f"GIOŚ returned non-JSON response: {text[:200]}"
+                ) from err
+
+    @staticmethod
+    def _float_pl(value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return float(str(value).replace(",", "."))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _distance_km(
+        lat1: float,
+        lon1: float,
+        lat2: float,
+        lon2: float,
+    ) -> float:
+        from math import asin, cos, radians, sin, sqrt
+
+        radius = 6371.0
+        dlat = radians(lat2 - lat1)
+        dlon = radians(lon2 - lon1)
+        a = (
+            sin(dlat / 2) ** 2
+            + cos(radians(lat1))
+            * cos(radians(lat2))
+            * sin(dlon / 2) ** 2
+        )
+        return 2 * radius * asin(sqrt(a))
+
+    async def _nearest_gios_station(
+        self,
+        home_lat: float,
+        home_lon: float,
+    ) -> dict[str, Any] | None:
+        now = time.monotonic()
+
+        if (
+            self._gios_station_cache
+            and now - self._gios_station_cache[0] < 6 * 3600
+        ):
+            return self._gios_station_cache[1]
+
+        payload = await self._gios_get("station/findAll?size=500")
+        stations = []
+
+        if isinstance(payload, dict):
+            stations = (
+                payload.get("Lista stacji pomiarowych")
+                or payload.get("stations")
+                or []
+            )
+        elif isinstance(payload, list):
+            stations = payload
+
+        candidates = []
+
+        for station in stations:
+            if not isinstance(station, dict):
+                continue
+
+            lat = self._float_pl(
+                station.get("WGS84 φ N")
+                or station.get("gegrLat")
+                or station.get("lat")
+            )
+            lon = self._float_pl(
+                station.get("WGS84 λ E")
+                or station.get("gegrLon")
+                or station.get("lon")
+            )
+
+            if lat is None or lon is None:
+                continue
+
+            station_id = (
+                station.get("Identyfikator stacji")
+                or station.get("id")
+            )
+
+            if station_id is None:
+                continue
+
+            item = dict(station)
+            item["_id"] = station_id
+            item["_lat"] = lat
+            item["_lon"] = lon
+            item["_distance_km"] = self._distance_km(
+                home_lat,
+                home_lon,
+                lat,
+                lon,
+            )
+            candidates.append(item)
+
+        if not candidates:
+            self._gios_station_cache = (now, None)
+            return None
+
+        station = min(
+            candidates,
+            key=lambda item: item["_distance_km"],
+        )
+        self._gios_station_cache = (now, station)
+        return station
+
     async def air_quality(
         self,
         home_lat: float,
         home_lon: float,
     ) -> dict[str, Any]:
-        return {}
+        """Return current air quality from the nearest GIOŚ station."""
+        station = await self._nearest_gios_station(
+            home_lat,
+            home_lon,
+        )
+
+        if not station:
+            return {}
+
+        station_id = station["_id"]
+
+        # Index
+        index_name = None
+        index_value = None
+        critical = None
+
+        try:
+            index_payload = await self._gios_get(
+                f"aqindex/getIndex/{station_id}"
+            )
+
+            index_data = (
+                index_payload.get("AqIndex", {})
+                if isinstance(index_payload, dict)
+                else {}
+            )
+
+            index_name = (
+                index_data.get("Nazwa kategorii indeksu")
+                or index_data.get("stIndexLevel", {}).get("indexLevelName")
+                if isinstance(index_data.get("stIndexLevel"), dict)
+                else None
+            )
+            index_value = (
+                index_data.get("Wartość indeksu")
+                or index_data.get("stIndexLevel", {}).get("id")
+                if isinstance(index_data.get("stIndexLevel"), dict)
+                else None
+            )
+            critical = (
+                index_data.get("Kod zanieczyszczenia krytycznego")
+                or index_data.get("stSourceDataDate")
+            )
+        except Exception:
+            # Measurements are still useful even if index is temporarily absent.
+            pass
+
+        sensors_payload = await self._gios_get(
+            f"station/sensors/{station_id}?size=500"
+        )
+
+        if isinstance(sensors_payload, dict):
+            sensors = (
+                sensors_payload.get(
+                    "Lista stanowisk pomiarowych dla podanej stacji"
+                )
+                or sensors_payload.get("Lista stanowisk pomiarowych")
+                or sensors_payload.get("sensors")
+                or []
+            )
+        elif isinstance(sensors_payload, list):
+            sensors = sensors_payload
+        else:
+            sensors = []
+
+        grouped: dict[str, list[Any]] = {}
+
+        for sensor in sensors:
+            if not isinstance(sensor, dict):
+                continue
+
+            sensor_id = (
+                sensor.get("Identyfikator stanowiska")
+                or sensor.get("id")
+            )
+            code = (
+                sensor.get("Wskaźnik - wzór")
+                or sensor.get("Wskaźnik - kod")
+                or sensor.get("param", {}).get("paramFormula")
+                if isinstance(sensor.get("param"), dict)
+                else None
+            )
+
+            if sensor_id is None or not code:
+                continue
+
+            code_norm = str(code).strip().upper()
+            grouped.setdefault(code_norm, []).append(sensor_id)
+
+        measurements: dict[str, dict[str, Any]] = {}
+
+        # Prefer useful pollutants in stable order.
+        wanted = (
+            "PM2.5",
+            "PM10",
+            "NO2",
+            "O3",
+            "SO2",
+            "CO",
+        )
+
+        for code in wanted:
+            sensor_ids = grouped.get(code, [])
+            latest = None
+
+            # A station can have both manual and automatic positions.
+            # Try all IDs and use the first one that provides a current value.
+            for sensor_id in sensor_ids:
+                try:
+                    data_payload = await self._gios_get(
+                        f"data/getData/{sensor_id}"
+                    )
+                except Exception:
+                    continue
+
+                if isinstance(data_payload, dict):
+                    values = (
+                        data_payload.get("Lista danych pomiarowych")
+                        or data_payload.get("values")
+                        or []
+                    )
+                else:
+                    values = []
+
+                for value in values:
+                    if not isinstance(value, dict):
+                        continue
+
+                    reading = (
+                        value.get("Wartość")
+                        if "Wartość" in value
+                        else value.get("value")
+                    )
+
+                    if reading is None:
+                        continue
+
+                    latest = {
+                        "value": reading,
+                        "time": (
+                            value.get("Data")
+                            or value.get("date")
+                        ),
+                    }
+                    break
+
+                if latest:
+                    break
+
+            if latest:
+                key = (
+                    code.lower()
+                    .replace(".", "")
+                    .replace(" ", "")
+                )
+                measurements[key] = {
+                    "name": code,
+                    "value": latest["value"],
+                    "unit": "µg/m³",
+                    "time": latest["time"],
+                }
+
+        return {
+            "station": (
+                station.get("Nazwa stacji")
+                or station.get("stationName")
+                or f"GIOŚ {station_id}"
+            ),
+            "station_id": station_id,
+            "distance_km": round(
+                float(station["_distance_km"]),
+                2,
+            ),
+            "address": (
+                station.get("Adres")
+                or station.get("addressStreet")
+            ),
+            "index": index_name,
+            "index_value": index_value,
+            "critical_pollutant": critical,
+            "source": "GIOŚ",
+            "measurements": measurements,
+        }
 
     async def events(self) -> list[dict[str, Any]]:
-        return []
+        """Read upcoming Warsaw events from the official CAM Warsaw calendar."""
+        now_mono = time.monotonic()
+
+        if (
+            self._events_cache
+            and now_mono - self._events_cache[0] < 30 * 60
+        ):
+            return self._events_cache[1]
+
+        headers = {
+            "Accept": "text/html",
+            "User-Agent": "ha-warsaw-city/0.3.0",
+        }
+
+        async with self.session.get(
+            WARSAW_EVENTS_URL,
+            headers=headers,
+            timeout=30,
+        ) as resp:
+            resp.raise_for_status()
+            html = await resp.text()
+
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for heading in soup.find_all(["h2", "h3"]):
+            title = heading.get_text(" ", strip=True)
+
+            if not title or title in seen:
+                continue
+
+            # Walk up until we find the event card/container.
+            container = heading
+            card_text = ""
+
+            for _ in range(6):
+                parent = getattr(container, "parent", None)
+                if parent is None:
+                    break
+                container = parent
+                card_text = container.get_text(
+                    "\n",
+                    strip=True,
+                )
+                if (
+                    "Organizator:" in card_text
+                    and any(month in card_text.casefold() for month in _EVENT_MONTHS)
+                ):
+                    break
+
+            if "Organizator:" not in card_text:
+                continue
+
+            if not any(
+                month in card_text.casefold()
+                for month in _EVENT_MONTHS
+            ):
+                continue
+
+            lines = [
+                line.strip()
+                for line in card_text.splitlines()
+                if line.strip()
+            ]
+
+            organizer = None
+            place = None
+            date_text = None
+            free = "Wstęp wolny" in card_text
+
+            for idx, line in enumerate(lines):
+                if line.startswith("Organizator:"):
+                    organizer = line.split(
+                        "Organizator:",
+                        1,
+                    )[1].strip() or None
+
+                if (
+                    line == "Warszawa,"
+                    and idx + 1 < len(lines)
+                ):
+                    place = lines[idx + 1]
+
+            # Keep the human-readable date fragment instead of guessing timezone.
+            date_candidates = [
+                line
+                for line in lines
+                if (
+                    re.search(r"\b\d{1,2}([–-]\d{1,2})?\b", line)
+                    or "godz." in line
+                )
+                and any(
+                    month in " ".join(lines).casefold()
+                    for month in _EVENT_MONTHS
+                )
+            ]
+
+            if date_candidates:
+                date_text = " ".join(
+                    date_candidates[:3]
+                )
+
+            link = heading.find("a", href=True)
+            if link is None:
+                link = container.find("a", href=True)
+
+            url = (
+                link.get("href")
+                if link is not None
+                else WARSAW_EVENTS_URL
+            )
+
+            events.append(
+                {
+                    "title": title,
+                    "organizer": organizer,
+                    "date": date_text,
+                    "place": place,
+                    "free": free,
+                    "url": url,
+                    "source": "CAM Warszawa",
+                }
+            )
+            seen.add(title)
+
+            if len(events) >= 20:
+                break
+
+        self._events_cache = (
+            now_mono,
+            events,
+        )
+        return events
 
     async def alerts(
         self,
