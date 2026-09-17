@@ -64,9 +64,15 @@ class WarsawStopSensor(WarsawBase, SensorEntity):
             .get(self.key, {})
             .get("departures", [])
         )
+        upcoming = [
+            departure
+            for departure in departures
+            if not departure.get("is_past", False)
+        ]
+
         return (
-            departures[0]["minutes"]
-            if departures
+            upcoming[0]["minutes"]
+            if upcoming
             else None
         )
 

@@ -596,7 +596,9 @@ class WarsawApi:
                     microsecond=0,
                 ) + timedelta(days=day_add)
 
-                if dep < now - timedelta(seconds=30):
+                # Keep departures for 5 minutes after scheduled time so the
+                # Lovelace card can mark a just-departed vehicle in red.
+                if dep < now - timedelta(minutes=5):
                     continue
 
                 brigade = str(
@@ -656,6 +658,13 @@ class WarsawApi:
                                 // 60
                             ),
                         ),
+                        "minutes_delta": int(
+                            (
+                                dep - now
+                            ).total_seconds()
+                            // 60
+                        ),
+                        "is_past": dep < now,
                         "vehicle": live,
                     }
                 )

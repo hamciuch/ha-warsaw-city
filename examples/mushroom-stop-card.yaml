@@ -1,0 +1,66 @@
+type: custom:mushroom-template-card
+entity: sensor.nowe_wlochy_03
+icon: mdi:bus-stop
+icon_color: teal
+primary: >-
+  🚏 {{ state_attr('sensor.nowe_wlochy_03', 'friendly_name') or 'Nowe Włochy 03' }}
+secondary: >-
+  {% set e = 'sensor.nowe_wlochy_03' %}
+  {% set deps = state_attr(e, 'departures') or [] %}
+  {% set now_ts = as_timestamp(now()) %}
+  {% set ns = namespace(next_found=false, rows=[]) %}
+
+  {% for d in deps %}
+    {% set dep_ts = as_timestamp(d.scheduled, 0) %}
+    {% if dep_ts %}
+      {% set diff = ((dep_ts - now_ts) / 60) | round(0, 'floor') | int %}
+
+      {% if -5 <= diff <= 60 %}
+        {% if diff < 0 %}
+          {% set marker = '🔴' %}
+          {% set suffix = (-diff) ~ ' min temu' %}
+        {% elif not ns.next_found %}
+          {% set marker = '🟢' %}
+          {% set suffix = 'za ' ~ diff ~ ' min' %}
+          {% set ns.next_found = true %}
+        {% else %}
+          {% set marker = '🔵' %}
+          {% set suffix = 'za ' ~ diff ~ ' min' %}
+        {% endif %}
+
+        {% set row = marker ~ '  ' ~ d.line ~ '   ' ~ d.time ~ '   • ' ~ suffix %}
+        {% set ns.rows = ns.rows + [row] %}
+      {% endif %}
+    {% endif %}
+  {% endfor %}
+
+  {% if ns.rows %}
+  {{ ns.rows | join('\n') }}
+  {% else %}
+  Brak odjazdów w najbliższej godzinie
+  {% endif %}
+multiline_secondary: true
+tap_action:
+  action: more-info
+card_mod:
+  style: |
+    ha-card {
+      border-radius: 18px;
+      padding: 6px 8px;
+    }
+
+    mushroom-shape-icon {
+      --icon-size: 42px;
+    }
+
+    .primary {
+      font-size: 18px !important;
+      font-weight: 700 !important;
+    }
+
+    .secondary {
+      white-space: pre-line !important;
+      font-size: 15px !important;
+      line-height: 1.8 !important;
+      opacity: 1 !important;
+    }
