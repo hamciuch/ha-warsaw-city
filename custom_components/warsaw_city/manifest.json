@@ -1,0 +1,11 @@
+{
+  "domain": "warsaw_city",
+  "name": "Warsaw City Open Data",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://api.um.warszawa.pl/",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}
