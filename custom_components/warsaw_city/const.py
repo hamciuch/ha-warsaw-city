@@ -12,5 +12,5 @@ DEPARTURES_ENDPOINT = "get_ztm_odjazdy_linii_z_przystanku"
 # exposes a documented disruptions endpoint suitable for line filtering.
 ALERTS_URL = "https://mkuran.pl/gtfs/warsaw/alerts.json"
 
-DEFAULT_DEPARTURES = 6
+DEFAULT_DEPARTURES = 15
 VEHICLE_MAX_AGE_SECONDS = 180

@@ -1238,20 +1238,45 @@ class WarsawApi:
             seen.add(title)
 
             # Collect more than needed BEFORE filtering out navigation headings.
-            if len(raw_events) >= 40:
+            if len(raw_events) >= 100:
                 break
 
-        # The key v0.3.5 change: do not alter the working scraper;
-        # simply remove known non-event headings afterwards.
-        events = [
-            event
-            for event in raw_events
-            if event["title"].casefold()
-            not in ignored_titles
-        ]
+        # Keep the proven v0.3.0 scraper, then filter only in post-processing.
+        senior_terms = (
+            "senior",
+            "seniora",
+            "seniorów",
+            "seniorzy",
+            "60+",
+            "59+",
+            "wiek powyżej: 60",
+            "wiek powyżej: 59",
+            "uniwersytet trzeciego wieku",
+            "trzeciego wieku",
+        )
 
-        # Sort only when a timestamp could be parsed.
-        # Unparseable but real events stay in the feed at the end.
+        events = []
+
+        for event in raw_events:
+            if event["title"].casefold() in ignored_titles:
+                continue
+
+            searchable = " ".join(
+                str(event.get(key) or "")
+                for key in (
+                    "title",
+                    "organizer",
+                    "date",
+                    "place",
+                )
+            ).casefold()
+
+            if any(term in searchable for term in senior_terms):
+                continue
+
+            events.append(event)
+
+        # Sort dated events chronologically; undated but valid events remain last.
         events.sort(
             key=lambda event: (
                 event.get("start") is None,
@@ -1259,7 +1284,9 @@ class WarsawApi:
             )
         )
 
-        result = events[:20]
+        # Keep plenty of events available to Lovelace. The card can choose
+        # how many to display.
+        result = events[:30]
 
         self._events_cache = (
             now_mono,
