@@ -1007,7 +1007,7 @@ class WarsawApi:
 
         headers = {
             "Accept": "text/html",
-            "User-Agent": "ha-warsaw-city/0.3.2",
+            "User-Agent": "ha-warsaw-city/0.3.3",
         }
 
         async with self.session.get(
@@ -1040,18 +1040,10 @@ class WarsawApi:
 
         now = datetime.now().astimezone()
 
-        # Important: only links to actual event detail pages are accepted.
-        # This prevents headings such as "Kalendarz wydarzeń", "Termin",
-        # "Kategorie wydarzeń" and "Bilety" from becoming fake events.
-        event_links = [
-            link
-            for link in soup.find_all("a", href=True)
-            if "/wydarzenie/" in str(link.get("href") or "")
-        ]
-
-        for link in event_links:
+        for link in soup.find_all("a", href=True):
             href = str(link.get("href") or "").strip()
-            if not href:
+
+            if "/wydarzenie/" not in href:
                 continue
 
             url = urljoin(WARSAW_EVENTS_URL, href)
@@ -1059,30 +1051,42 @@ class WarsawApi:
             if url in seen_urls:
                 continue
 
-            heading = link.find_parent(["h2", "h3", "h4"])
-            if heading is None:
-                continue
+            # Use the event link itself as the title source.
+            # This is more robust than requiring a specific h2/h3/h4 structure.
+            title = link.get_text(" ", strip=True)
 
-            title = heading.get_text(" ", strip=True)
             if not title:
                 continue
 
-            # Find the smallest parent that looks like one complete event card.
-            container = heading
+            # Ignore generic action labels such as "Zapisz się".
+            if title.casefold() in {
+                "zapisz się",
+                "więcej",
+                "czytaj więcej",
+                "szczegóły",
+            }:
+                continue
+
+            container = link
             card_text = ""
 
-            for _ in range(8):
+            # Find the nearest ancestor containing event metadata.
+            for _ in range(10):
                 parent = getattr(container, "parent", None)
                 if parent is None:
                     break
 
                 container = parent
-                candidate = container.get_text("\n", strip=True)
+                candidate = container.get_text(
+                    "\n",
+                    strip=True,
+                )
 
                 if (
                     "Organizator:" in candidate
                     and (
-                        "Warszawa," in candidate
+                        "godz." in candidate
+                        or "Warszawa," in candidate
                         or "Wstęp wolny" in candidate
                         or "Bilet:" in candidate
                     )
@@ -1115,47 +1119,57 @@ class WarsawApi:
                     and idx + 1 < len(lines)
                 ):
                     possible_place = lines[idx + 1]
-                    if possible_place not in (
-                        "Wstęp wolny",
-                        "Zapisz się",
-                    ) and not possible_place.startswith("Bilet:"):
+
+                    if (
+                        possible_place not in (
+                            "Wstęp wolny",
+                            "Zapisz się",
+                        )
+                        and not possible_place.startswith("Bilet:")
+                    ):
                         place = possible_place
 
-            # CAM cards expose the date as separate pieces:
-            # 17 / wrz / czwartek, godz. 18:00
             day_text = None
             month_text = None
             time_text = None
 
+            # CAM presents the date roughly as:
+            # 17 / wrz / czwartek, godz. 18:00
             for idx, line_text in enumerate(lines):
-                if (
-                    day_text is None
-                    and re.fullmatch(
-                        r"\d{1,2}(?:[-–]\d{1,2})?",
-                        line_text,
-                    )
+                if not re.fullmatch(
+                    r"\d{1,2}(?:[-–]\d{1,2})?",
+                    line_text,
                 ):
-                    # The following line should be a Polish month abbreviation.
-                    if idx + 1 < len(lines):
-                        next_line = lines[idx + 1].casefold()
-                        if next_line in month_map:
-                            day_text = line_text
-                            month_text = next_line
-                            if idx + 2 < len(lines):
-                                candidate_time = lines[idx + 2]
-                                if "godz." in candidate_time:
-                                    time_text = candidate_time
-                            break
+                    continue
+
+                if idx + 1 >= len(lines):
+                    continue
+
+                month_candidate = lines[idx + 1].casefold()
+
+                if month_candidate not in month_map:
+                    continue
+
+                day_text = line_text
+                month_text = month_candidate
+
+                # Search a few lines forward for "godz."
+                for look_ahead in lines[idx + 2:idx + 6]:
+                    if "godz." in look_ahead:
+                        time_text = look_ahead
+                        break
+
+                break
 
             date_text = None
             start_iso = None
 
             if day_text and month_text:
                 date_text = f"{day_text} {month_text}"
+
                 if time_text:
                     date_text += f", {time_text}"
 
-                # Use the first day for sorting multi-day events.
                 first_day = int(
                     re.split(r"[-–]", day_text)[0]
                 )
@@ -1186,8 +1200,6 @@ class WarsawApi:
                         microsecond=0,
                     )
 
-                    # If the calendar rolls over into the next year,
-                    # keep a far-past date from sorting before current events.
                     if start_dt < now - timedelta(days=180):
                         start_dt = start_dt.replace(
                             year=year + 1
@@ -1196,6 +1208,16 @@ class WarsawApi:
                     start_iso = start_dt.isoformat()
                 except ValueError:
                     start_iso = None
+
+            # Only keep actual event cards that have at least some event metadata.
+            if not any(
+                (
+                    date_text,
+                    organizer,
+                    place,
+                )
+            ):
+                continue
 
             events.append(
                 {
@@ -1211,28 +1233,35 @@ class WarsawApi:
             )
             seen_urls.add(url)
 
-        # Real dated events first; preserve CAM page order as fallback.
-        dated = [
+        # Put current/future dated events first.
+        dated_future = [
             event
             for event in events
-            if event.get("start")
+            if (
+                event.get("start")
+                and datetime.fromisoformat(
+                    event["start"]
+                ) >= now - timedelta(hours=3)
+            )
         ]
+
         undated = [
             event
             for event in events
             if not event.get("start")
         ]
 
-        dated.sort(
+        dated_future.sort(
             key=lambda event: event["start"]
         )
 
-        result = (dated + undated)[:20]
+        result = (dated_future + undated)[:20]
 
         self._events_cache = (
             now_mono,
             result,
         )
+
         return result
 
     async def alerts(
