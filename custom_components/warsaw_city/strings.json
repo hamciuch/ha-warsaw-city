@@ -3,31 +3,65 @@
     "step": {
       "user": {
         "title": "Warsaw City Open Data",
-        "description": "Podaj token API wygenerowany w dane.um.warszawa.pl.",
-        "data": {"api_key": "Token API"}
+        "description": "Podaj token API z dane.um.warszawa.pl",
+        "data": {
+          "api_key": "Token API"
+        }
       }
     },
     "error": {
-      "invalid_auth": "Token został odrzucony przez dane.um.warszawa.pl.",
-      "cannot_connect": "Nie udało się połączyć z dane.um.warszawa.pl.",
-      "unknown": "Wystąpił nieoczekiwany błąd. Sprawdź log Home Assistant."
+      "cannot_connect": "Nie udało się połączyć z API.",
+      "invalid_auth": "Token API jest nieprawidłowy.",
+      "unknown": "Wystąpił nieznany błąd."
     }
   },
   "options": {
     "step": {
-      "add_stop": {"title": "Dodaj przystanek", "data": {"query": "Nazwa przystanku"}},
-      "choose_stop": {"title": "Wybierz zespół przystankowy", "data": {"stop": "Przystanek"}},
-      "choose_post": {"title": "Wybierz słupek", "data": {"post": "Numer słupka"}},
-      "remove_stop": {"title": "Usuń przystanek", "data": {"stop": "Przystanek"}}
+      "init": {
+        "title": "Konfiguracja Warsaw City Open Data"
+      },
+      "add_stop": {
+        "title": "Dodaj przystanek",
+        "description": "Wpisz nazwę przystanku, np. Kleszczowa.",
+        "data": {
+          "query": "Nazwa przystanku"
+        }
+      },
+      "choose_stop": {
+        "title": "Wybierz zespół przystankowy",
+        "data": {
+          "stop": "Przystanek"
+        }
+      },
+      "choose_post": {
+        "title": "Wybierz słupek",
+        "data": {
+          "post": "Numer słupka"
+        }
+      },
+      "choose_lines": {
+        "title": "Wybierz linie",
+        "description": "Zaznacz linie, które mają być monitorowane na tym słupku. Alerty WTP będą filtrowane tylko do tych linii.",
+        "data": {
+          "lines": "Monitorowane linie"
+        }
+      },
+      "remove_stop": {
+        "title": "Usuń przystanek",
+        "data": {
+          "stop": "Przystanek"
+        }
+      }
     },
     "error": {
-      "invalid_auth": "Token został odrzucony przez dane.um.warszawa.pl.",
-      "cannot_connect": "Nie udało się pobrać danych z dane.um.warszawa.pl.",
-      "stop_not_found": "Nie znaleziono przystanku."
+      "stop_not_found": "Nie znaleziono przystanku.",
+      "cannot_connect": "Nie udało się pobrać danych z API.",
+      "invalid_auth": "Token API został odrzucony."
     },
     "abort": {
       "no_posts": "Nie znaleziono słupków dla tego przystanku.",
-      "no_stops": "Nie ma zapisanych przystanków."
+      "no_stops": "Nie ma zapisanych przystanków.",
+      "no_lines": "Nie znaleziono linii dla tego słupka."
     }
   }
 }

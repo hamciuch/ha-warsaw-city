@@ -3,31 +3,65 @@
     "step": {
       "user": {
         "title": "Warsaw City Open Data",
-        "description": "Enter the API token generated at dane.um.warszawa.pl.",
-        "data": {"api_key": "API token"}
+        "description": "Enter your API token from dane.um.warszawa.pl",
+        "data": {
+          "api_key": "API token"
+        }
       }
     },
     "error": {
-      "invalid_auth": "The token was rejected by dane.um.warszawa.pl.",
-      "cannot_connect": "Could not connect to dane.um.warszawa.pl.",
-      "unknown": "An unexpected error occurred. Check the Home Assistant log."
+      "cannot_connect": "Unable to connect to the API.",
+      "invalid_auth": "The API token is invalid.",
+      "unknown": "An unknown error occurred."
     }
   },
   "options": {
     "step": {
-      "add_stop": {"title": "Add stop", "data": {"query": "Stop name"}},
-      "choose_stop": {"title": "Choose stop group", "data": {"stop": "Stop"}},
-      "choose_post": {"title": "Choose stop post", "data": {"post": "Post number"}},
-      "remove_stop": {"title": "Remove stop", "data": {"stop": "Stop"}}
+      "init": {
+        "title": "Warsaw City Open Data configuration"
+      },
+      "add_stop": {
+        "title": "Add stop",
+        "description": "Enter a stop name.",
+        "data": {
+          "query": "Stop name"
+        }
+      },
+      "choose_stop": {
+        "title": "Choose stop group",
+        "data": {
+          "stop": "Stop"
+        }
+      },
+      "choose_post": {
+        "title": "Choose stop post",
+        "data": {
+          "post": "Post number"
+        }
+      },
+      "choose_lines": {
+        "title": "Choose lines",
+        "description": "Choose the lines to monitor at this stop post. WTP alerts will be filtered to these lines only.",
+        "data": {
+          "lines": "Monitored lines"
+        }
+      },
+      "remove_stop": {
+        "title": "Remove stop",
+        "data": {
+          "stop": "Stop"
+        }
+      }
     },
     "error": {
-      "invalid_auth": "The token was rejected by dane.um.warszawa.pl.",
-      "cannot_connect": "Could not download data from dane.um.warszawa.pl.",
-      "stop_not_found": "Stop not found."
+      "stop_not_found": "Stop not found.",
+      "cannot_connect": "Unable to download API data.",
+      "invalid_auth": "The API token was rejected."
     },
     "abort": {
-      "no_posts": "No stop posts were found for this stop.",
-      "no_stops": "No stops have been configured."
+      "no_posts": "No stop posts found.",
+      "no_stops": "There are no configured stops.",
+      "no_lines": "No lines found for this stop post."
     }
   }
 }

@@ -1,11 +1,12 @@
 {
   "domain": "warsaw_city",
   "name": "Warsaw City Open Data",
-  "codeowners": [],
+  "codeowners": [
+    "@hamciuch"
+  ],
   "config_flow": true,
-  "documentation": "https://dane.um.warszawa.pl/",
-  "integration_type": "service",
+  "documentation": "https://github.com/hamciuch/ha-warsaw-city",
   "iot_class": "cloud_polling",
-  "requirements": [],
-  "version": "0.2.0"
+  "issue_tracker": "https://github.com/hamciuch/ha-warsaw-city/issues",
+  "version": "0.2.1"
 }
