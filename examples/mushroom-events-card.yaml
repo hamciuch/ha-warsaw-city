@@ -1,0 +1,115 @@
+type: vertical-stack
+cards:
+  - type: custom:mushroom-template-card
+    primary: Wydarzenia w Warszawie
+    icon: mdi:calendar-star
+    icon_color: teal
+    card_mod:
+      style: |
+        ha-card {
+          border-radius: 16px;
+        }
+
+  - type: custom:mushroom-template-card
+    entity: sensor.events
+    primary: >-
+      {% set ev = state_attr('sensor.events','events') or [] %}
+      {{ ev[0].title if ev|count > 0 else 'Brak wydarzeń' }}
+    secondary: >-
+      {% set ev = state_attr('sensor.events','events') or [] %}
+      {% if ev|count > 0 %}
+        {{ ev[0].date or '' }}
+        {% if ev[0].place %} • {{ ev[0].place }}{% endif %}
+      {% endif %}
+    icon: mdi:calendar-check
+    multiline_secondary: true
+    tap_action:
+      action: url
+      url_path: >-
+        {% set ev = state_attr('sensor.events','events') or [] %}
+        {{ ev[0].url if ev|count > 0 else '' }}
+    card_mod:
+      style: |
+        ha-card {
+          background: rgba(76,175,80,0.20) !important;
+          border-left: 6px solid rgb(76,175,80);
+          border-radius: 12px;
+        }
+
+  - type: custom:mushroom-template-card
+    entity: sensor.events
+    primary: >-
+      {% set ev = state_attr('sensor.events','events') or [] %}
+      {{ ev[1].title if ev|count > 1 else '' }}
+    secondary: >-
+      {% set ev = state_attr('sensor.events','events') or [] %}
+      {% if ev|count > 1 %}
+        {{ ev[1].date or '' }}
+        {% if ev[1].place %} • {{ ev[1].place }}{% endif %}
+      {% endif %}
+    icon: mdi:calendar
+    multiline_secondary: true
+    tap_action:
+      action: url
+      url_path: >-
+        {% set ev = state_attr('sensor.events','events') or [] %}
+        {{ ev[1].url if ev|count > 1 else '' }}
+    card_mod:
+      style: |
+        ha-card {
+          background: rgba(33,150,243,0.18) !important;
+          border-left: 6px solid rgb(33,150,243);
+          border-radius: 12px;
+        }
+
+  - type: custom:mushroom-template-card
+    entity: sensor.events
+    primary: >-
+      {% set ev = state_attr('sensor.events','events') or [] %}
+      {{ ev[2].title if ev|count > 2 else '' }}
+    secondary: >-
+      {% set ev = state_attr('sensor.events','events') or [] %}
+      {% if ev|count > 2 %}
+        {{ ev[2].date or '' }}
+        {% if ev[2].place %} • {{ ev[2].place }}{% endif %}
+      {% endif %}
+    icon: mdi:calendar
+    multiline_secondary: true
+    tap_action:
+      action: url
+      url_path: >-
+        {% set ev = state_attr('sensor.events','events') or [] %}
+        {{ ev[2].url if ev|count > 2 else '' }}
+    card_mod:
+      style: |
+        ha-card {
+          background: rgba(33,150,243,0.18) !important;
+          border-left: 6px solid rgb(33,150,243);
+          border-radius: 12px;
+        }
+
+  - type: custom:mushroom-template-card
+    entity: sensor.events
+    primary: >-
+      {% set ev = state_attr('sensor.events','events') or [] %}
+      {{ ev[3].title if ev|count > 3 else '' }}
+    secondary: >-
+      {% set ev = state_attr('sensor.events','events') or [] %}
+      {% if ev|count > 3 %}
+        {{ ev[3].date or '' }}
+        {% if ev[3].place %} • {{ ev[3].place }}{% endif %}
+      {% endif %}
+    icon: mdi:calendar
+    multiline_secondary: true
+    tap_action:
+      action: url
+      url_path: >-
+        {% set ev = state_attr('sensor.events','events') or [] %}
+        {{ ev[3].url if ev|count > 3 else '' }}
+    card_mod:
+      style: |
+        ha-card {
+          background: rgba(33,150,243,0.18) !important;
+          border-left: 6px solid rgb(33,150,243);
+          border-radius: 12px;
+        }
