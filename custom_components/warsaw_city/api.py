@@ -1007,7 +1007,7 @@ class WarsawApi:
 
         headers = {
             "Accept": "text/html",
-            "User-Agent": "ha-warsaw-city/0.3.3",
+            "User-Agent": "ha-warsaw-city/0.3.4",
         }
 
         async with self.session.get(
@@ -1020,7 +1020,7 @@ class WarsawApi:
 
         soup = BeautifulSoup(html, "html.parser")
         events: list[dict[str, Any]] = []
-        seen_urls: set[str] = set()
+        seen: set[tuple[str, str | None]] = set()
 
         month_map = {
             "sty": 1,
@@ -1038,60 +1038,48 @@ class WarsawApi:
             "gru": 12,
         }
 
+        generic_headings = {
+            "baza aktywności",
+            "kalendarz wydarzeń",
+            "termin",
+            "kategorie wydarzeń",
+            "bilety",
+            "warszawski punkt informacji senioralnej",
+        }
+
         now = datetime.now().astimezone()
 
-        for link in soup.find_all("a", href=True):
-            href = str(link.get("href") or "").strip()
-
-            if "/wydarzenie/" not in href:
-                continue
-
-            url = urljoin(WARSAW_EVENTS_URL, href)
-
-            if url in seen_urls:
-                continue
-
-            # Use the event link itself as the title source.
-            # This is more robust than requiring a specific h2/h3/h4 structure.
-            title = link.get_text(" ", strip=True)
+        # CAM renders actual event names as H2 headings.
+        # We do NOT depend on a specific href shape anymore.
+        for heading in soup.find_all(["h2", "h3", "h4"]):
+            title = heading.get_text(" ", strip=True)
 
             if not title:
                 continue
 
-            # Ignore generic action labels such as "Zapisz się".
-            if title.casefold() in {
-                "zapisz się",
-                "więcej",
-                "czytaj więcej",
-                "szczegóły",
-            }:
+            if title.casefold() in generic_headings:
                 continue
 
-            container = link
+            # Find the smallest ancestor that contains exactly one event's
+            # metadata. If the ancestor already contains multiple organizers,
+            # it is a section/page wrapper, not an event card.
+            container = heading
             card_text = ""
 
-            # Find the nearest ancestor containing event metadata.
             for _ in range(10):
                 parent = getattr(container, "parent", None)
                 if parent is None:
                     break
 
                 container = parent
-                candidate = container.get_text(
-                    "\n",
-                    strip=True,
-                )
+                candidate = container.get_text("\n", strip=True)
+                organizer_count = candidate.count("Organizator:")
 
-                if (
-                    "Organizator:" in candidate
-                    and (
-                        "godz." in candidate
-                        or "Warszawa," in candidate
-                        or "Wstęp wolny" in candidate
-                        or "Bilet:" in candidate
-                    )
-                ):
+                if organizer_count == 1:
                     card_text = candidate
+                    break
+
+                if organizer_count > 1:
                     break
 
             if not card_text:
@@ -1133,7 +1121,7 @@ class WarsawApi:
             month_text = None
             time_text = None
 
-            # CAM presents the date roughly as:
+            # Date is rendered as separate lines, e.g.
             # 17 / wrz / czwartek, godz. 18:00
             for idx, line_text in enumerate(lines):
                 if not re.fullmatch(
@@ -1153,71 +1141,80 @@ class WarsawApi:
                 day_text = line_text
                 month_text = month_candidate
 
-                # Search a few lines forward for "godz."
-                for look_ahead in lines[idx + 2:idx + 6]:
+                for look_ahead in lines[idx + 2:idx + 7]:
                     if "godz." in look_ahead:
                         time_text = look_ahead
                         break
 
                 break
 
-            date_text = None
+            # This single condition eliminates navigation/filter headings.
+            if not day_text or not month_text:
+                continue
+
+            date_text = f"{day_text} {month_text}"
+            if time_text:
+                date_text += f", {time_text}"
+
+            first_day = int(
+                re.split(r"[-–]", day_text)[0]
+            )
+            month_num = month_map[month_text]
+
+            hour = 0
+            minute = 0
+
+            if time_text:
+                match = re.search(
+                    r"godz\.\s*(\d{1,2}):(\d{2})",
+                    time_text,
+                )
+                if match:
+                    hour = int(match.group(1))
+                    minute = int(match.group(2))
+
             start_iso = None
 
-            if day_text and month_text:
-                date_text = f"{day_text} {month_text}"
-
-                if time_text:
-                    date_text += f", {time_text}"
-
-                first_day = int(
-                    re.split(r"[-–]", day_text)[0]
+            try:
+                start_dt = now.replace(
+                    year=now.year,
+                    month=month_num,
+                    day=first_day,
+                    hour=hour,
+                    minute=minute,
+                    second=0,
+                    microsecond=0,
                 )
-                month_num = month_map[month_text]
 
-                hour = 0
-                minute = 0
-
-                if time_text:
-                    match = re.search(
-                        r"godz\.\s*(\d{1,2}):(\d{2})",
-                        time_text,
-                    )
-                    if match:
-                        hour = int(match.group(1))
-                        minute = int(match.group(2))
-
-                year = now.year
-
-                try:
-                    start_dt = now.replace(
-                        year=year,
-                        month=month_num,
-                        day=first_day,
-                        hour=hour,
-                        minute=minute,
-                        second=0,
-                        microsecond=0,
+                # Handle year rollover.
+                if start_dt < now - timedelta(days=180):
+                    start_dt = start_dt.replace(
+                        year=now.year + 1
                     )
 
-                    if start_dt < now - timedelta(days=180):
-                        start_dt = start_dt.replace(
-                            year=year + 1
-                        )
+                start_iso = start_dt.isoformat()
+            except ValueError:
+                pass
 
-                    start_iso = start_dt.isoformat()
-                except ValueError:
-                    start_iso = None
+            link = heading.find("a", href=True)
+            if link is None:
+                link = container.find("a", href=True)
 
-            # Only keep actual event cards that have at least some event metadata.
-            if not any(
-                (
-                    date_text,
-                    organizer,
-                    place,
+            url = (
+                urljoin(
+                    WARSAW_EVENTS_URL,
+                    str(link.get("href")),
                 )
-            ):
+                if link is not None
+                else WARSAW_EVENTS_URL
+            )
+
+            key = (title, start_iso)
+
+            if key in seen:
                 continue
+
+            seen.add(key)
 
             events.append(
                 {
@@ -1231,31 +1228,31 @@ class WarsawApi:
                     "source": "CAM Warszawa",
                 }
             )
-            seen_urls.add(url)
 
-        # Put current/future dated events first.
-        dated_future = [
-            event
-            for event in events
-            if (
-                event.get("start")
-                and datetime.fromisoformat(
-                    event["start"]
-                ) >= now - timedelta(hours=3)
-            )
-        ]
+        # Keep only current/future events; events without a parsed timestamp
+        # remain at the end rather than killing the whole feed.
+        future = []
+        undated = []
 
-        undated = [
-            event
-            for event in events
-            if not event.get("start")
-        ]
+        for event in events:
+            if not event.get("start"):
+                undated.append(event)
+                continue
 
-        dated_future.sort(
+            try:
+                start_dt = datetime.fromisoformat(event["start"])
+            except ValueError:
+                undated.append(event)
+                continue
+
+            if start_dt >= now - timedelta(hours=3):
+                future.append(event)
+
+        future.sort(
             key=lambda event: event["start"]
         )
 
-        result = (dated_future + undated)[:20]
+        result = (future + undated)[:20]
 
         self._events_cache = (
             now_mono,

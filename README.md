@@ -1,17 +1,20 @@
-# Warsaw City Open Data v0.3.3
+# Warsaw City Open Data v0.3.4
 
-Fixes CAM event extraction after v0.3.2 returned an empty list.
+CAM Events parser rewrite.
 
-Changes:
-- event title is taken directly from the `/wydarzenie/` link;
-- no dependency on the link being wrapped in h2/h3/h4;
-- event metadata is discovered from the nearest ancestor block;
-- generic links such as "Zapisz się" are ignored;
-- filter headings are still excluded because they are not `/wydarzenie/` links;
-- current/future dated events are sorted chronologically.
+Why v0.3.3 still returned zero:
+the parser depended too much on link/container structure.
+
+v0.3.4:
+- detects actual event H2/H3/H4 headings;
+- explicitly ignores CAM filter headings;
+- requires a real date block (day + Polish month abbreviation);
+- only accepts the smallest ancestor containing exactly one `Organizator:`;
+- extracts title/date/time/place/organizer/free/url;
+- sorts current/future events chronologically.
 
 Overwrite:
 - custom_components/warsaw_city/api.py
 - custom_components/warsaw_city/manifest.json
 
-Restart Home Assistant afterwards.
+Restart Home Assistant.
