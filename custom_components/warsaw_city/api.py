@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import re
 import time
 from typing import Any
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
