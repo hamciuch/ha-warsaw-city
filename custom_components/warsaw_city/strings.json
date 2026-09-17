@@ -22,7 +22,7 @@
       },
       "add_stop": {
         "title": "Dodaj przystanek",
-        "description": "Wpisz nazwę przystanku, np. Kleszczowa.",
+        "description": "Wpisz nazwę przystanku, np. Nowe Włochy.",
         "data": {
           "query": "Nazwa przystanku"
         }
@@ -41,7 +41,7 @@
       },
       "choose_lines": {
         "title": "Wybierz linie",
-        "description": "Zaznacz linie, które mają być monitorowane na tym słupku. Alerty WTP będą filtrowane tylko do tych linii.",
+        "description": "Zaznacz linie monitorowane na tym słupku. Domyślnie zaznaczone są wszystkie.",
         "data": {
           "lines": "Monitorowane linie"
         }
@@ -56,7 +56,9 @@
     "error": {
       "stop_not_found": "Nie znaleziono przystanku.",
       "cannot_connect": "Nie udało się pobrać danych z API.",
-      "invalid_auth": "Token API został odrzucony."
+      "invalid_auth": "Token API został odrzucony.",
+      "lines_api_error": "API zwróciło błąd podczas pobierania linii dla wybranego słupka.",
+      "lines_unknown_error": "Wystąpił błąd podczas przygotowywania listy linii dla słupka."
     },
     "abort": {
       "no_posts": "Nie znaleziono słupków dla tego przystanku.",

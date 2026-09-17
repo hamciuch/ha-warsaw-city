@@ -17,11 +17,13 @@ class WarsawCityConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input=None):
         errors = {}
+
         if user_input:
             api = WarsawApi(
                 async_get_clientsession(self.hass),
                 user_input[CONF_API_KEY],
             )
+
             try:
                 await api.validate()
             except WarsawApiAuthError:
@@ -33,6 +35,7 @@ class WarsawCityConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 await self.async_set_unique_id(DOMAIN)
                 self._abort_if_unique_id_configured()
+
                 return self.async_create_entry(
                     title="Warsaw City Open Data",
                     data=user_input,
@@ -49,8 +52,6 @@ class WarsawCityConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        # HA 2025.12+ injects config_entry into OptionsFlow.
-        # Do not pass/set it manually.
         return WarsawOptionsFlow()
 
 
@@ -62,6 +63,12 @@ class WarsawOptionsFlow(config_entries.OptionsFlow):
         self._selected_post = None
         self._lines = []
 
+    def _api(self) -> WarsawApi:
+        return WarsawApi(
+            async_get_clientsession(self.hass),
+            self.config_entry.data[CONF_API_KEY],
+        )
+
     async def async_step_init(self, user_input=None):
         return self.async_show_menu(
             step_id="init",
@@ -72,12 +79,10 @@ class WarsawOptionsFlow(config_entries.OptionsFlow):
         errors = {}
 
         if user_input:
-            api = WarsawApi(
-                async_get_clientsession(self.hass),
-                self.config_entry.data[CONF_API_KEY],
-            )
             try:
-                self.matches = await api.find_stop_groups(user_input["query"])
+                self.matches = await self._api().find_stop_groups(
+                    user_input["query"]
+                )
             except WarsawApiAuthError:
                 errors["base"] = "invalid_auth"
             except Exception:
@@ -97,22 +102,26 @@ class WarsawOptionsFlow(config_entries.OptionsFlow):
         )
 
     async def async_step_choose_stop(self, user_input=None):
+        errors = {}
+
         if user_input:
             stop_id = user_input["stop"]
             self.selected = next(
-                x for x in self.matches if x["id"] == stop_id
+                x for x in self.matches
+                if x["id"] == stop_id
             )
 
-            api = WarsawApi(
-                async_get_clientsession(self.hass),
-                self.config_entry.data[CONF_API_KEY],
-            )
-            self._posts = await api.stop_posts(stop_id)
+            try:
+                self._posts = await self._api().stop_posts(stop_id)
+            except WarsawApiAuthError:
+                errors["base"] = "invalid_auth"
+            except Exception:
+                errors["base"] = "cannot_connect"
+            else:
+                if not self._posts:
+                    return self.async_abort(reason="no_posts")
 
-            if not self._posts:
-                return self.async_abort(reason="no_posts")
-
-            return await self.async_step_choose_post()
+                return await self.async_step_choose_post()
 
         choices = {
             x["id"]: f'{x["name"]} ({x["id"]})'
@@ -124,38 +133,46 @@ class WarsawOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema(
                 {vol.Required("stop"): vol.In(choices)}
             ),
+            errors=errors,
         )
 
     async def async_step_choose_post(self, user_input=None):
+        errors = {}
+
         if user_input:
             self._selected_post = user_input["post"]
 
-            api = WarsawApi(
-                async_get_clientsession(self.hass),
-                self.config_entry.data[CONF_API_KEY],
-            )
+            try:
+                self._lines = await self._api().stop_lines(
+                    self.selected["id"],
+                    self._selected_post,
+                )
+            except WarsawApiAuthError:
+                errors["base"] = "invalid_auth"
+            except WarsawApiError:
+                errors["base"] = "lines_api_error"
+            except (aiohttp.ClientError, TimeoutError):
+                errors["base"] = "cannot_connect"
+            except Exception:
+                errors["base"] = "lines_unknown_error"
+            else:
+                if not self._lines:
+                    return self.async_abort(reason="no_lines")
 
-            self._lines = await api.stop_lines(
-                self.selected["id"],
-                self._selected_post,
-            )
-
-            if not self._lines:
-                return self.async_abort(reason="no_lines")
-
-            return await self.async_step_choose_lines()
+                return await self.async_step_choose_lines()
 
         return self.async_show_form(
             step_id="choose_post",
             data_schema=vol.Schema(
                 {vol.Required("post"): vol.In(self._posts)}
             ),
+            errors=errors,
         )
 
     async def async_step_choose_lines(self, user_input=None):
         if user_input:
             chosen_lines = sorted(
-                {str(x) for x in user_input["lines"]}
+                {str(x) for x in user_input.get("lines", [])}
             )
 
             stops = list(
@@ -169,17 +186,15 @@ class WarsawOptionsFlow(config_entries.OptionsFlow):
                 "lines": chosen_lines,
             }
 
-            # Replace configuration for the same physical stop/post
-            # instead of creating duplicates.
             stops = [
-                s
-                for s in stops
+                s for s in stops
                 if not (
                     str(s.get("id")) == str(item["id"])
                     and str(s.get("nr")).zfill(2)
                     == str(item["nr"]).zfill(2)
                 )
             ]
+
             stops.append(item)
 
             return self.async_create_entry(
@@ -187,11 +202,7 @@ class WarsawOptionsFlow(config_entries.OptionsFlow):
                 data={CONF_STOPS: stops},
             )
 
-        options = [
-            selector.SelectOptionDict(value=line, label=line)
-            for line in self._lines
-        ]
-
+        # Use only the most compatible SelectSelector form.
         return self.async_show_form(
             step_id="choose_lines",
             data_schema=vol.Schema(
@@ -201,9 +212,9 @@ class WarsawOptionsFlow(config_entries.OptionsFlow):
                         default=list(self._lines),
                     ): selector.SelectSelector(
                         selector.SelectSelectorConfig(
-                            options=options,
+                            options=list(self._lines),
                             multiple=True,
-                            mode=selector.SelectSelectorMode.DROPDOWN,
+                            mode="dropdown",
                         )
                     )
                 }
@@ -219,8 +230,12 @@ class WarsawOptionsFlow(config_entries.OptionsFlow):
             return self.async_abort(reason="no_stops")
 
         choices = {}
+
         for stop in stops:
-            lines = ", ".join(stop.get("lines", [])) or "wszystkie"
+            lines = ", ".join(
+                stop.get("lines", [])
+            ) or "wszystkie"
+
             key = f'{stop["id"]}_{stop["nr"]}'
             choices[key] = (
                 f'{stop["name"]} {stop["nr"]} — {lines}'
@@ -228,11 +243,12 @@ class WarsawOptionsFlow(config_entries.OptionsFlow):
 
         if user_input:
             key = user_input["stop"]
+
             stops = [
-                s
-                for s in stops
+                s for s in stops
                 if f'{s["id"]}_{s["nr"]}' != key
             ]
+
             return self.async_create_entry(
                 title="",
                 data={CONF_STOPS: stops},

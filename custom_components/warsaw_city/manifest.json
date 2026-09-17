@@ -8,5 +8,5 @@
   "documentation": "https://github.com/hamciuch/ha-warsaw-city",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/hamciuch/ha-warsaw-city/issues",
-  "version": "0.2.1"
+  "version": "0.2.2"
 }

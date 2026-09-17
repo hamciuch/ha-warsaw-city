@@ -41,7 +41,7 @@
       },
       "choose_lines": {
         "title": "Choose lines",
-        "description": "Choose the lines to monitor at this stop post. WTP alerts will be filtered to these lines only.",
+        "description": "Select monitored lines. All are selected by default.",
         "data": {
           "lines": "Monitored lines"
         }
@@ -56,7 +56,9 @@
     "error": {
       "stop_not_found": "Stop not found.",
       "cannot_connect": "Unable to download API data.",
-      "invalid_auth": "The API token was rejected."
+      "invalid_auth": "The API token was rejected.",
+      "lines_api_error": "The API returned an error while loading lines for this stop post.",
+      "lines_unknown_error": "An error occurred while preparing the line list."
     },
     "abort": {
       "no_posts": "No stop posts found.",

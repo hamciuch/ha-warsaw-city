@@ -1,14 +1,9 @@
-# Warsaw City Open Data v0.2.1 fix
+# v0.2.2 options-flow fix
 
-Patch for:
-- HA 2025.12+ OptionsFlow (`self.config_entry` is read-only)
-- stop selection in UI
-- stop-post selection in UI
-- multi-select monitored lines
-- departures filtered to selected lines
-- WTP alerts filtered to selected lines
+Patch changes:
+- safer line selection after choosing a stop post
+- catches API errors instead of Home Assistant generic "Unknown error occurred"
+- uses a simpler multi-select selector compatible with more HA versions
+- version bumped to 0.2.2
 
-Copy these files over the matching files in:
-`custom_components/warsaw_city/`
-
-Then restart Home Assistant.
+Copy files over `custom_components/warsaw_city/`, restart Home Assistant, and retry adding the stop.
